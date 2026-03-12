@@ -3,7 +3,8 @@
  * Core chunking library for Chonkie - lightweight and efficient text chunking
  */
 
-export { RecursiveChunker, initWasm } from '@/recursive';
+export { RecursiveChunker } from '@/recursive';
+export { initWasm } from '@/wasm';
 export type { RecursiveChunkerOptions } from '@/recursive';
 
 export { TokenChunker } from '@/token';

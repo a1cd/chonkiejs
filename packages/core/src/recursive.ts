@@ -1,19 +1,7 @@
-import { init as initChunk, split_offsets, merge_splits } from '@chonkiejs/chunk';
+import { split_offsets, merge_splits } from '@chonkiejs/chunk';
 import { Tokenizer } from '@/tokenizer';
 import { Chunk, RecursiveRules, RecursiveLevel, IncludeDelim } from '@/types';
-
-// Track WASM initialization
-let wasmInitialized = false;
-
-/**
- * Initialize the WASM module. Called automatically by RecursiveChunker.create().
- */
-export async function initWasm(): Promise<void> {
-  if (!wasmInitialized) {
-    await initChunk();
-    wasmInitialized = true;
-  }
-}
+import { initWasm } from '@/wasm';
 
 /**
  * Configuration options for RecursiveChunker.
