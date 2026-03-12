@@ -79,7 +79,7 @@ Available with @chonkiejs/token: gpt2, bert-base-uncased, Xenova/gpt-4, etc.
    * @returns Array of character codes
    */
   encode(text: string): number[] {
-    return Array.from(text).map(char => char.charCodeAt(0));
+    return Array.from(text).map(char => char.codePointAt(0)!);
   }
 
   /**
@@ -90,7 +90,7 @@ Available with @chonkiejs/token: gpt2, bert-base-uncased, Xenova/gpt-4, etc.
    * @returns The decoded text
    */
   decode(tokens: number[]): string {
-    return String.fromCharCode(...tokens);
+    return String.fromCodePoint(...tokens);
   }
 
   /**

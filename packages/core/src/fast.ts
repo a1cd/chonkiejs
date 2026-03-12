@@ -1,14 +1,6 @@
-import { chunk_offsets, init as initChunk } from '@chonkiejs/chunk';
+import { chunk_offsets } from '@chonkiejs/chunk';
 import { Chunk } from '@/types';
-
-let wasmInitialized = false;
-
-async function initWasm(): Promise<void> {
-  if (!wasmInitialized) {
-    await initChunk();
-    wasmInitialized = true;
-  }
-}
+import { initWasm } from '@/wasm';
 
 export interface FastChunkerOptions {
   /** Target chunk size in bytes (default: 4096) */
