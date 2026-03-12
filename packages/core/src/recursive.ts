@@ -1,7 +1,19 @@
-import { split_offsets, merge_splits } from '@chonkiejs/chunk';
+import { init as initChunk, split_offsets, merge_splits } from '@chonkiejs/chunk';
 import { Tokenizer } from '@/tokenizer';
 import { Chunk, RecursiveRules, RecursiveLevel, IncludeDelim } from '@/types';
-import { initWasm } from '@/wasm';
+
+// Track WASM initialization
+let wasmInitialized = false;
+
+/**
+ * Initialize the WASM module. Called automatically by RecursiveChunker.create().
+ */
+export async function initWasm(): Promise<void> {
+  if (!wasmInitialized) {
+    await initChunk();
+    wasmInitialized = true;
+  }
+}
 
 /**
  * Configuration options for RecursiveChunker.
@@ -132,9 +144,15 @@ export class RecursiveChunker {
 
     // Delimiter splitting - use WASM split
     if (level.delimiters) {
-      const delims = Array.isArray(level.delimiters)
+      // WASM split_offsets treats each character in the delimiters string as a
+      // separate single-char delimiter. When the level uses multi-character
+      // delimiters (e.g. ['. ', '! ', '? ']), joining them naively would turn
+      // space into a delimiter too, collapsing all segments via minChars.
+      // Extract unique non-space characters to preserve the intended split.
+      const rawDelims = Array.isArray(level.delimiters)
         ? level.delimiters.join('')
         : level.delimiters;
+      const delims = [...new Set(rawDelims)].filter(c => c !== ' ').join('');
 
       // Map includeDelim to WASM format
       const includeDelim: 'prev' | 'next' | 'none' =
