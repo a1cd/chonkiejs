@@ -95,12 +95,15 @@ export class TokenChunker {
     const tokens = this.tokenizer.encode(text);
     const chunks: Chunk[] = [];
     const step = this.chunkSize - this.chunkOverlap;
+    const allChars = Array.from(text);
 
     for (let i = 0; i < tokens.length; i += step) {
       const chunkTokens = tokens.slice(i, i + this.chunkSize);
       const chunkText = this.tokenizer.decode(chunkTokens);
-      const startIndex = this.findStartIndex(text, chunkText, i > 0 ? chunks[chunks.length - 1].endIndex : 0);
-      const endIndex = startIndex + chunkText.length;
+      const startCharIndex = i;
+      const endCharIndex = Math.min(i + this.chunkSize, allChars.length);
+      const startIndex = allChars.slice(0, startCharIndex).join('').length;
+      const endIndex = allChars.slice(0, endCharIndex).join('').length;
 
       chunks.push(new Chunk({
         text: chunkText,
@@ -111,15 +114,6 @@ export class TokenChunker {
     }
 
     return chunks;
-  }
-
-  /**
-   * Find the start index of chunk text in the original text.
-   * This handles overlaps correctly.
-   */
-  private findStartIndex(text: string, chunkText: string, searchFrom: number): number {
-    const index = text.indexOf(chunkText, searchFrom);
-    return index !== -1 ? index : searchFrom;
   }
 
   toString(): string {
