@@ -16,6 +16,12 @@ export type { TableChunkerOptions } from '@/table';
 export { FastChunker } from '@/fast';
 export type { FastChunkerOptions } from '@/fast';
 
+export { SentenceChunker } from '@/sentence';
+export type { SentenceChunkerOptions } from '@/sentence';
+
+export { CodeChunker } from '@/code';
+export type { CodeChunkerOptions } from '@/code';
+
 export { Tokenizer } from '@/tokenizer';
 
 export { Chunk, RecursiveLevel, RecursiveRules } from '@/types';
