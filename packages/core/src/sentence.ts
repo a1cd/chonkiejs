@@ -130,33 +130,28 @@ export class SentenceChunker {
   }
 
   /**
-   * Split text into sentence segments using delimiters.
-   * Uses WASM split_offsets for single-byte delimiters, JS-side splitting for multi-byte.
+   * Split text into sentence segments using delimiters and return their offsets.
    */
-  private splitText(text: string): string[] {
+  private splitTextOffsets(text: string): [number, number][] {
     const hasMultiByte = this.delim.some(d => d.length > 1);
 
     if (hasMultiByte) {
-      return this.splitByPatterns(text);
+      return this.splitByPatternsOffsets(text);
     }
 
     // All single-byte delimiters: use WASM split_offsets
     const delimStr = this.delim.join('');
-    const offsets = split_offsets(text, {
+    return split_offsets(text, {
       delimiters: delimStr,
       includeDelim: this.includeDelim,
       minChars: this.minCharactersPerSentence,
     });
-
-    return offsets.map(([start, end]) => text.slice(start, end)).filter(s => s.length > 0);
   }
 
   /**
-   * Split text by multi-byte delimiter patterns.
-   * Scans text for delimiter occurrences and splits accordingly.
+   * Split text by multi-byte delimiter patterns and return offsets.
    */
-  private splitByPatterns(text: string): string[] {
-    // Find all delimiter positions
+  private splitByPatternsOffsets(text: string): [number, number][] {
     const delimPositions: { index: number; length: number }[] = [];
     for (const d of this.delim) {
       let pos = 0;
@@ -169,13 +164,11 @@ export class SentenceChunker {
     }
 
     if (delimPositions.length === 0) {
-      return text.length > 0 ? [text] : [];
+      return text.length > 0 ? [[0, text.length]] : [];
     }
 
-    // Sort by position
     delimPositions.sort((a, b) => a.index - b.index);
 
-    // Remove overlapping delimiters (keep earliest)
     const filtered: typeof delimPositions = [delimPositions[0]];
     for (let i = 1; i < delimPositions.length; i++) {
       const prev = filtered[filtered.length - 1];
@@ -184,68 +177,60 @@ export class SentenceChunker {
       }
     }
 
-    // Build segments based on includeDelim
-    const segments: string[] = [];
+    const offsets: [number, number][] = [];
     let cursor = 0;
 
     for (const dp of filtered) {
       const delimEnd = dp.index + dp.length;
 
       if (this.includeDelim === 'prev') {
-        // Delimiter attaches to end of previous segment
-        const seg = text.slice(cursor, delimEnd);
-        if (seg.length > 0) segments.push(seg);
-        cursor = delimEnd;
+        const end = delimEnd;
+        if (end > cursor) offsets.push([cursor, end]);
+        cursor = end;
       } else if (this.includeDelim === 'next') {
-        // Delimiter attaches to start of next segment
-        const seg = text.slice(cursor, dp.index);
-        if (seg.length > 0) segments.push(seg);
+        const end = dp.index;
+        if (end > cursor) offsets.push([cursor, end]);
         cursor = dp.index;
       } else {
-        // Drop delimiter
-        const seg = text.slice(cursor, dp.index);
-        if (seg.length > 0) segments.push(seg);
+        const end = dp.index;
+        if (end > cursor) offsets.push([cursor, end]);
         cursor = delimEnd;
       }
     }
 
-    // Remaining text after last delimiter
     if (cursor < text.length) {
-      const remaining = text.slice(cursor);
-      if (remaining.length > 0) segments.push(remaining);
+      offsets.push([cursor, text.length]);
     }
 
-    // Merge segments shorter than minCharactersPerSentence with adjacent
-    return this.mergeShortSegments(segments);
+    return this.mergeShortOffsets(text, offsets);
   }
 
   /**
-   * Merge segments that are shorter than minCharactersPerSentence
-   * with the following segment.
+   * Merge short offsets with the following segment.
    */
-  private mergeShortSegments(segments: string[]): string[] {
-    if (segments.length <= 1) return segments;
+  private mergeShortOffsets(text: string, offsets: [number, number][]): [number, number][] {
+    if (offsets.length <= 1) return offsets;
 
-    const result: string[] = [];
-    let buffer = '';
+    const result: [number, number][] = [];
+    let currentStart = offsets[0][0];
 
-    for (const seg of segments) {
-      buffer += seg;
-      if (buffer.length >= this.minCharactersPerSentence) {
-        result.push(buffer);
-        buffer = '';
+    for (let i = 0; i < offsets.length; i++) {
+      const [_s, e] = offsets[i];
+      const length = e - currentStart;
+
+      if (length >= this.minCharactersPerSentence || i === offsets.length - 1) {
+        // If this is the last one and it's still too short, merge it into the previous if it exists
+        if (i === offsets.length - 1 && length < this.minCharactersPerSentence && result.length > 0) {
+          const last = result[result.length - 1];
+          result[result.length - 1] = [last[0], e];
+        } else {
+          result.push([currentStart, e]);
+          if (i < offsets.length - 1) {
+            currentStart = offsets[i + 1][0];
+          }
+        }
       }
     }
-
-    // Attach leftover buffer to last result segment or push as-is
-    if (buffer.length > 0) {
-      if (result.length > 0) {
-        result[result.length - 1] += buffer;
-      } else {
-        result.push(buffer);
-      }
-    }
-
     return result;
   }
 
@@ -253,24 +238,21 @@ export class SentenceChunker {
    * Prepare sentence objects with position and token metadata.
    */
   private prepareSentences(text: string): Sentence[] {
-    const sentenceTexts = this.splitText(text);
-    if (sentenceTexts.length === 0) return [];
+    const offsets = this.splitTextOffsets(text);
+    if (offsets.length === 0) return [];
 
     const sentences: Sentence[] = [];
-    let currentPos = 0;
 
-    for (const sentText of sentenceTexts) {
-      const startIndex = text.indexOf(sentText, currentPos);
+    for (const [start, end] of offsets) {
+      const sentText = text.slice(start, end);
       const tokenCount = this.tokenizer.countTokens(sentText);
 
       sentences.push({
         text: sentText,
-        startIndex,
-        endIndex: startIndex + sentText.length,
+        startIndex: start,
+        endIndex: end,
         tokenCount,
       });
-
-      currentPos = startIndex + sentText.length;
     }
 
     return sentences;
@@ -342,17 +324,19 @@ export class SentenceChunker {
         let overlapTokens = 0;
         let overlapIdx = splitIdx - 1;
 
-        while (overlapIdx > pos && overlapTokens < this.chunkOverlap) {
+        while (overlapIdx >= pos) {
           const sent = sentences[overlapIdx];
-          const nextTokens = overlapTokens + sent.tokenCount + 1; // +1 for space
-          if (nextTokens > this.chunkOverlap) {
+          const nextTokens = overlapTokens + sent.tokenCount;
+          if (nextTokens > this.chunkOverlap && overlapTokens > 0) {
             break;
           }
           overlapTokens = nextTokens;
           overlapIdx--;
         }
 
-        pos = overlapIdx + 1;
+        const nextPos = overlapIdx + 1;
+        // Ensure progress to avoid infinite loops when overlap > sentence size
+        pos = nextPos > pos ? nextPos : splitIdx;
       } else {
         pos = splitIdx;
       }

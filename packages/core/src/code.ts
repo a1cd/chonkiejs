@@ -1,5 +1,9 @@
 /**
  * Code chunker that splits code into chunks using tree-sitter AST parsing.
+ *
+ * API mirrors Python `chonkie.chunker.code.CodeChunker`: tokenizer, chunk size,
+ * and a `language` string id (e.g. `"python"`) or wasm source; advanced users
+ * may pass a pre-configured `parser` instead.
  */
 
 import type { Node, Parser as TreeSitterParser, Language } from 'web-tree-sitter';
@@ -11,13 +15,114 @@ export interface CodeChunkerOptions {
   tokenizer?: Tokenizer | string;
   /** Maximum tokens per chunk (default: 2048) */
   chunkSize?: number;
-  /** Pre-configured tree-sitter Parser with a language already set */
-  parser?: TreeSitterParser;
-  /** Path/URL to a language WASM file, or a Language instance (used when parser is not provided) */
+  /**
+   * Tree-sitter grammar, like Python `CodeChunker(language=...)`.
+   *
+   * - Filesystem path or `file:` / `https:` URL to a **web-tree-sitter** language
+   *   `.wasm` (build grammars with the same tree-sitter version as `web-tree-sitter`).
+   * - A `Language` instance from `Language.load(...)`.
+   *
+   * Short names such as `"python"` are not resolved automatically (unlike Python’s
+   * `tree-sitter-language-pack`); pass a wasm path/URL or use `parser`.
+   *
+   * `"auto"` is not supported in JavaScript.
+   */
   language?: string | Language;
+  /** Pre-configured Parser with language set; when set, `language` is ignored */
+  parser?: TreeSitterParser;
 }
 
 type NodeGroup = Node[];
+
+function looksLikeWasmSource(s: string): boolean {
+  const t = s.trim();
+  return (
+    t.endsWith('.wasm') ||
+    t.startsWith('file:') ||
+    t.startsWith('http:') ||
+    t.startsWith('https:') ||
+    t.startsWith('/') ||
+    t.startsWith('./') ||
+    t.startsWith('../') ||
+    /^[a-zA-Z]:[\\/]/.test(t)
+  );
+}
+
+/**
+ * Load grammar wasm from a path, file URL, or https URL.
+ * On Node.js, local `.wasm` paths are passed as filesystem strings so
+ * `web-tree-sitter` opens them itself (avoids broken Windows `file:` URL joins).
+ */
+async function loadLanguageWasm(
+  specifier: string,
+  LanguageImpl: typeof import('web-tree-sitter').Language
+): Promise<Language> {
+  const s = specifier.trim();
+  if (s.startsWith('http://') || s.startsWith('https://')) {
+    return LanguageImpl.load(s);
+  }
+
+  const isNode = typeof process !== 'undefined' && !!process.versions?.node;
+  if (isNode) {
+    const path = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const { existsSync } = await import('node:fs');
+
+    let filePath: string | undefined;
+    if (s.startsWith('file:')) {
+      filePath = fileURLToPath(s);
+    } else if (
+      s.endsWith('.wasm') ||
+      path.isAbsolute(s) ||
+      s.startsWith('./') ||
+      s.startsWith('../') ||
+      /^[a-zA-Z]:[\\/]/.test(s) ||
+      (s.startsWith('/') && !s.startsWith('//'))
+    ) {
+      filePath =
+        path.isAbsolute(s) || /^[a-zA-Z]:[\\/]/.test(s) || (s.startsWith('/') && !s.startsWith('//'))
+          ? s
+          : path.resolve(process.cwd(), s);
+    }
+
+    if (filePath !== undefined) {
+      if (!existsSync(filePath)) {
+        throw new Error(`CodeChunker: wasm file not found: ${filePath}`);
+      }
+      // Pass a path string on Node so web-tree-sitter loads the file (avoids broken
+      // `file:` URL handling on Windows when using `pathToFileURL` + string).
+      return LanguageImpl.load(filePath);
+    }
+  }
+
+  return LanguageImpl.load(s);
+}
+
+async function loadLanguageFromOption(
+  language: string | Language,
+  LanguageImpl: typeof import('web-tree-sitter').Language
+): Promise<Language> {
+  if (typeof language !== 'string') {
+    return language;
+  }
+
+  const trimmed = language.trim();
+  if (trimmed === 'auto') {
+    throw new Error(
+      'CodeChunker: language "auto" is not supported in JavaScript. ' +
+        'Pass a tree-sitter language id (e.g. "python", "javascript"), a .wasm URL or path, or `parser`.'
+    );
+  }
+
+  if (looksLikeWasmSource(trimmed)) {
+    return loadLanguageWasm(trimmed, LanguageImpl);
+  }
+
+  throw new Error(
+    `CodeChunker: unknown language "${trimmed}". ` +
+      'Pass a path or URL to a web-tree-sitter grammar `.wasm`, a `Language` instance, or use `parser`.'
+  );
+}
 
 /**
  * Splits code into semantically meaningful chunks using a tree-sitter AST.
@@ -28,38 +133,43 @@ type NodeGroup = Node[];
  */
 export class CodeChunker {
   public readonly chunkSize: number;
+  /** Language id or wasm source passed at creation, or `'parser'` when a parser was supplied */
+  public readonly language: string | Language;
   private tokenizer: Tokenizer;
   private parser: TreeSitterParser;
 
-  private constructor(tokenizer: Tokenizer, chunkSize: number, parser: TreeSitterParser) {
+  private constructor(
+    tokenizer: Tokenizer,
+    chunkSize: number,
+    parser: TreeSitterParser,
+    language: string | Language
+  ) {
     this.tokenizer = tokenizer;
     this.chunkSize = chunkSize;
     this.parser = parser;
+    this.language = language;
   }
 
   /**
-   * Create a CodeChunker instance.
+   * Create a CodeChunker instance (async: tokenizer + tree-sitter init).
    *
-   * Requires either a pre-configured `parser` or a `language` option (WASM path or Language object).
+   * Mirrors Python `CodeChunker(tokenizer=..., chunk_size=..., language=...)`:
+   * pass a grammar wasm path/URL (web-tree-sitter format) or a `Language` instance,
+   * or supply a pre-built `parser`.
    *
    * @example
-   * // With a language WASM path:
    * const chunker = await CodeChunker.create({
-   *   language: '/path/to/tree-sitter-javascript.wasm',
+   *   language: '/path/to/tree-sitter-python.wasm',
    *   chunkSize: 512,
    * });
+   * const chunks = chunker.chunk(source);
    *
    * @example
-   * // With a pre-configured parser:
-   * import Parser from 'web-tree-sitter';
-   * await Parser.init();
-   * const parser = new Parser();
-   * const lang = await Parser.Language.load('/path/to/tree-sitter-python.wasm');
-   * parser.setLanguage(lang);
+   * // Advanced: pre-configured parser
    * const chunker = await CodeChunker.create({ parser, chunkSize: 512 });
    */
   static async create(options: CodeChunkerOptions = {}): Promise<CodeChunker> {
-    const { tokenizer = 'character', chunkSize = 2048 } = options;
+    const { tokenizer = 'character', chunkSize = 2048, parser: parserOpt } = options;
 
     if (chunkSize <= 0) {
       throw new Error('chunkSize must be greater than 0');
@@ -72,28 +182,29 @@ export class CodeChunker {
       tokenizerInstance = tokenizer;
     }
 
-    // Dynamic import to avoid issues in builds that don't use CodeChunker
     const { Parser: ParserImpl, Language: LanguageImpl } = await import('web-tree-sitter');
 
     let parser: TreeSitterParser;
+    let languageRecord: string | Language;
 
-    if (options.parser) {
-      parser = options.parser;
-    } else if (options.language) {
+    if (parserOpt) {
+      parser = parserOpt;
+      languageRecord = 'parser';
+    } else if (options.language !== undefined) {
       await ParserImpl.init();
-      const lang = typeof options.language === 'string'
-        ? await LanguageImpl.load(options.language)
-        : options.language;
+      const langOpt = options.language;
+      const lang = await loadLanguageFromOption(langOpt, LanguageImpl);
       parser = new ParserImpl();
       parser.setLanguage(lang);
+      languageRecord = typeof langOpt === 'string' ? langOpt.trim() : langOpt;
     } else {
       throw new Error(
-        'CodeChunker requires either a `parser` or a `language` option. ' +
-        'Pass a pre-configured tree-sitter Parser, or a path to a language WASM file.'
+        'CodeChunker requires `language` (wasm path/URL or Language) or `parser`, ' +
+          'like Python `CodeChunker(language=...)`. `language="auto"` is not supported in JavaScript.'
       );
     }
 
-    return new CodeChunker(tokenizerInstance, chunkSize, parser);
+    return new CodeChunker(tokenizerInstance, chunkSize, parser, languageRecord);
   }
 
   /**
@@ -247,11 +358,12 @@ export class CodeChunker {
 
     for (let i = 0; i < texts.length; i++) {
       const text = texts[i];
+      const tokenCount = tokenCounts[i] ?? this.tokenizer.countTokens(text);
       chunks.push(new Chunk({
         text,
         startIndex: currentIndex,
         endIndex: currentIndex + text.length,
-        tokenCount: tokenCounts[i],
+        tokenCount,
       }));
       currentIndex += text.length;
     }
@@ -260,12 +372,9 @@ export class CodeChunker {
   }
 
   /**
-   * Chunk code into AST-aware chunks.
-   *
-   * @param text - The source code to chunk
-   * @returns Array of chunks
+   * Chunk code into AST-aware chunks (synchronous; parser is ready after `create`).
    */
-  async chunk(text: string): Promise<Chunk[]> {
+  chunk(text: string): Chunk[] {
     if (!text || !text.trim()) {
       return [];
     }
@@ -287,6 +396,8 @@ export class CodeChunker {
   }
 
   toString(): string {
-    return `CodeChunker(chunkSize=${this.chunkSize})`;
+    const lang =
+      typeof this.language === 'string' ? JSON.stringify(this.language) : 'Language{…}';
+    return `CodeChunker(chunkSize=${this.chunkSize}, language=${lang})`;
   }
 }

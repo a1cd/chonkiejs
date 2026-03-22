@@ -36,6 +36,7 @@ describe('CodeChunker', () => {
       const chunker = await CodeChunker.create({ parser, chunkSize: 512 });
       expect(chunker).toBeInstanceOf(CodeChunker);
       expect(chunker.chunkSize).toBe(512);
+      expect(chunker.language).toBe('parser');
     });
 
     it('should use default chunkSize of 2048', async () => {
@@ -46,10 +47,16 @@ describe('CodeChunker', () => {
       expect(chunker.chunkSize).toBe(2048);
     });
 
+    it('should reject language "auto" with a clear error', async () => {
+      await expect(CodeChunker.create({ language: 'auto' })).rejects.toThrow(/not supported in JavaScript/);
+    });
+
     it('should throw when neither parser nor language is provided', async () => {
-      await expect(CodeChunker.create({})).rejects.toThrow(
-        'CodeChunker requires either a `parser` or a `language` option'
-      );
+      await expect(CodeChunker.create({})).rejects.toThrow(/requires `language`/);
+    });
+
+    it('should reject bare language names without a wasm path', async () => {
+      await expect(CodeChunker.create({ language: 'python' })).rejects.toThrow(/unknown language/);
     });
 
     it('should throw for invalid chunkSize', async () => {
@@ -70,8 +77,8 @@ describe('CodeChunker', () => {
       const root = makeNode('', 0);
       const chunker = await CodeChunker.create({ parser: makeFakeParser(root), chunkSize: 512 });
 
-      expect(await chunker.chunk('')).toHaveLength(0);
-      expect(await chunker.chunk('   ')).toHaveLength(0);
+      expect(chunker.chunk('')).toHaveLength(0);
+      expect(chunker.chunk('   ')).toHaveLength(0);
     });
 
     it('should produce a single chunk for small code', async () => {
@@ -80,7 +87,7 @@ describe('CodeChunker', () => {
       const root = makeNode(code, 0, [child]);
       const chunker = await CodeChunker.create({ parser: makeFakeParser(root), chunkSize: 512 });
 
-      const chunks = await chunker.chunk(code);
+      const chunks = chunker.chunk(code);
       expect(chunks.length).toBeGreaterThan(0);
       expect(chunks[0].text.trim()).toBeTruthy();
     });
@@ -104,7 +111,7 @@ describe('CodeChunker', () => {
       // chunkSize=30 chars → forces multiple chunks
       const chunker = await CodeChunker.create({ parser: makeFakeParser(root), chunkSize: 30 });
 
-      const chunks = await chunker.chunk(code);
+      const chunks = chunker.chunk(code);
       expect(chunks.length).toBeGreaterThan(1);
     });
 
@@ -117,7 +124,7 @@ describe('CodeChunker', () => {
       const root = makeNode(code, 0, [child1, child2]);
 
       const chunker = await CodeChunker.create({ parser: makeFakeParser(root), chunkSize: 512 });
-      const chunks = await chunker.chunk(code);
+      const chunks = chunker.chunk(code);
 
       for (const chunk of chunks) {
         expect(chunk.startIndex).toBeGreaterThanOrEqual(0);
@@ -140,7 +147,7 @@ describe('CodeChunker', () => {
       const root = makeNode(code, 0, children);
       const chunker = await CodeChunker.create({ parser: makeFakeParser(root), chunkSize: 20 });
 
-      const chunks = await chunker.chunk(code);
+      const chunks = chunker.chunk(code);
       const reconstructed = chunks.map(c => c.text).join('');
       expect(reconstructed).toBe(code);
     });
@@ -152,7 +159,7 @@ describe('CodeChunker', () => {
       const root = makeNode(code, 0, [child]);
       const chunker = await CodeChunker.create({ parser: makeFakeParser(root), chunkSize: 512 });
 
-      const chunks = await chunker.chunk(code);
+      const chunks = chunker.chunk(code);
       expect(chunks).toHaveLength(1);
       expect(chunks[0].text).toBe(code);
     });
@@ -169,7 +176,7 @@ describe('CodeChunker', () => {
       const root = makeNode(bigChildText, 0, [bigChild]);
 
       const chunker = await CodeChunker.create({ parser: makeFakeParser(root), chunkSize: 5 });
-      const chunks = await chunker.chunk(bigChildText);
+      const chunks = chunker.chunk(bigChildText);
 
       expect(chunks.length).toBeGreaterThan(0);
     });
@@ -184,7 +191,7 @@ describe('CodeChunker', () => {
       const root = makeNode(code, 0, [c1, c2]);
 
       const chunker = await CodeChunker.create({ parser: makeFakeParser(root), chunkSize: 512 });
-      const chunks = await chunker.chunk(code);
+      const chunks = chunker.chunk(code);
 
       for (const chunk of chunks) {
         expect(chunk).toHaveProperty('text');

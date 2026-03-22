@@ -36,7 +36,7 @@
   ],
   "dependencies": {
     "@chonkiejs/chunk": "^0.9.3",
-    "web-tree-sitter": "^0.26.7"
+    "web-tree-sitter": "0.25.10"
   },
   "devDependencies": {
     "rimraf": "^6.0.1",
