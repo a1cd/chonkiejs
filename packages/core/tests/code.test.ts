@@ -55,8 +55,22 @@ describe('CodeChunker', () => {
       await expect(CodeChunker.create({})).rejects.toThrow(/requires `language`/);
     });
 
-    it('should reject bare language names without a wasm path', async () => {
-      await expect(CodeChunker.create({ language: 'python' })).rejects.toThrow(/unknown language/);
+    it('should create a chunker with a tree-sitter-wasms language id', async () => {
+      const chunker = await CodeChunker.create({ language: 'javascript', chunkSize: 100 });
+      expect(chunker).toBeInstanceOf(CodeChunker);
+      expect(chunker.language).toBe('javascript');
+      const chunks = chunker.chunk('const x = 1;\nconst y = 2;\n');
+      expect(chunks.length).toBeGreaterThan(0);
+    });
+
+    it('should reject unknown language ids when tree-sitter-wasms has no matching wasm', async () => {
+      await expect(CodeChunker.create({ language: 'zzznonexistentlang999' })).rejects.toThrow(
+        /unknown language/
+      );
+    });
+
+    it('should reject non-wasm specifiers that are not valid tree-sitter-wasms ids', async () => {
+      await expect(CodeChunker.create({ language: 'foo bar' })).rejects.toThrow(/unknown language/);
     });
 
     it('should throw for invalid chunkSize', async () => {

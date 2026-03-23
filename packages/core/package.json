@@ -39,6 +39,7 @@
     "web-tree-sitter": "0.25.10"
   },
   "devDependencies": {
+    "tree-sitter-wasms": "^0.1.13",
     "rimraf": "^6.0.1",
     "ts-node": "^10.9.2",
     "tsc-alias": "^1.8.16",

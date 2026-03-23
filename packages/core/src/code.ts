@@ -2,8 +2,7 @@
  * Code chunker that splits code into chunks using tree-sitter AST parsing.
  *
  * API mirrors Python `chonkie.chunker.code.CodeChunker`: tokenizer, chunk size,
- * and a `language` string id (e.g. `"python"`) or wasm source; advanced users
- * may pass a pre-configured `parser` instead.
+ * and a `language` string id, wasm path/URL, or a pre-configured `parser`.
  */
 
 import type { Node, Parser as TreeSitterParser, Language } from 'web-tree-sitter';
@@ -22,8 +21,9 @@ export interface CodeChunkerOptions {
    *   `.wasm` (build grammars with the same tree-sitter version as `web-tree-sitter`).
    * - A `Language` instance from `Language.load(...)`.
    *
-   * Short names such as `"python"` are not resolved automatically (unlike Python’s
-   * `tree-sitter-language-pack`); pass a wasm path/URL or use `parser`.
+   * Short ids such as `"python"` or `"javascript"` resolve to grammars shipped in
+   * the `tree-sitter-wasms` package (install it next to your app; same layout as
+   * `tree-sitter-wasms/out/tree-sitter-<id>.wasm`).
    *
    * `"auto"` is not supported in JavaScript.
    */
@@ -46,6 +46,30 @@ function looksLikeWasmSource(s: string): boolean {
     t.startsWith('../') ||
     /^[a-zA-Z]:[\\/]/.test(t)
   );
+}
+
+/** Lowercase tree-sitter grammar names allowed for `tree-sitter-wasms` resolution. */
+const TREE_SITTER_WASMS_LANG_ID = /^[a-z0-9_-]+$/;
+
+/**
+ * Resolve `tree-sitter-wasms/out/tree-sitter-<id>.wasm` when the package is
+ * installed (Node.js only). Returns null if the id is invalid or resolve fails.
+ */
+async function resolveTreeSitterWasmsPath(languageId: string): Promise<string | null> {
+  const id = languageId.toLowerCase().trim();
+  if (!TREE_SITTER_WASMS_LANG_ID.test(id)) return null;
+
+  const isNode = typeof process !== 'undefined' && !!process.versions?.node;
+  if (!isNode) return null;
+
+  try {
+    const { createRequire } = await import('node:module');
+    const { fileURLToPath } = await import('node:url');
+    const nodeRequire = createRequire(fileURLToPath(import.meta.url));
+    return nodeRequire.resolve(`tree-sitter-wasms/out/tree-sitter-${id}.wasm`);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -110,7 +134,7 @@ async function loadLanguageFromOption(
   if (trimmed === 'auto') {
     throw new Error(
       'CodeChunker: language "auto" is not supported in JavaScript. ' +
-        'Pass a tree-sitter language id (e.g. "python", "javascript"), a .wasm URL or path, or `parser`.'
+        'Pass a language id (e.g. "javascript") with `tree-sitter-wasms` installed, a .wasm path or URL, or `parser`.'
     );
   }
 
@@ -118,9 +142,15 @@ async function loadLanguageFromOption(
     return loadLanguageWasm(trimmed, LanguageImpl);
   }
 
+  const fromWasms = await resolveTreeSitterWasmsPath(trimmed);
+  if (fromWasms) {
+    return loadLanguageWasm(fromWasms, LanguageImpl);
+  }
+
   throw new Error(
     `CodeChunker: unknown language "${trimmed}". ` +
-      'Pass a path or URL to a web-tree-sitter grammar `.wasm`, a `Language` instance, or use `parser`.'
+      'Pass a language id supported by `tree-sitter-wasms` (with that package installed), ' +
+      'a path or URL to a web-tree-sitter grammar `.wasm`, a `Language` instance, or use `parser`.'
   );
 }
 
@@ -154,8 +184,14 @@ export class CodeChunker {
    * Create a CodeChunker instance (async: tokenizer + tree-sitter init).
    *
    * Mirrors Python `CodeChunker(tokenizer=..., chunk_size=..., language=...)`:
-   * pass a grammar wasm path/URL (web-tree-sitter format) or a `Language` instance,
-   * or supply a pre-built `parser`.
+   * pass a `tree-sitter-wasms` language id, a grammar wasm path/URL (web-tree-sitter format),
+   * a `Language` instance, or a pre-built `parser`.
+   *
+   * @example
+   * const chunker = await CodeChunker.create({
+   *   language: 'javascript',
+   *   chunkSize: 512,
+   * });
    *
    * @example
    * const chunker = await CodeChunker.create({
@@ -227,6 +263,7 @@ export class CodeChunker {
     let currentTokenCount = 0;
 
     for (const child of node.children) {
+      if (child == null) continue;
       const tokenCount = this.tokenizer.countTokens(child.text ?? '');
 
       if (tokenCount > this.chunkSize) {
