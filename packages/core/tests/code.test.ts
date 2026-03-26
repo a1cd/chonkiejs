@@ -194,6 +194,21 @@ describe('CodeChunker', () => {
 
       expect(chunks.length).toBeGreaterThan(0);
     });
+
+    it('should throw an error for invalid group byte offsets', async () => {
+      const code = 'const x = 1;';
+      const node = makeNode(code, 0);
+      const invalidNode = {
+        ...node,
+        startIndex: 100, // Beyond code length
+        endIndex: 110,
+      };
+
+      const parser = makeFakeParser(invalidNode);
+      const chunker = await CodeChunker.create({ parser, chunkSize: 512 });
+
+      expect(() => chunker.chunk(code)).toThrow(/invalid byte offsets/);
+    });
   });
 
   describe('Chunk Properties', () => {

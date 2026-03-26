@@ -358,7 +358,12 @@ export class CodeChunker {
       const startByte = group[0].startIndex;
       let endByte = group[group.length - 1].endIndex;
 
-      if (startByte > endByte || startByte < 0 || endByte > originalBytes.length) continue;
+      if (startByte > endByte || startByte < 0 || endByte > originalBytes.length) {
+        throw new Error(
+          `CodeChunker: invalid byte offsets for node group at index ${i}: ` +
+            `start=${startByte}, end=${endByte}, total=${originalBytes.length}`
+        );
+      }
 
       // Extend end to next group's start to capture inter-node whitespace
       if (i < nodeGroups.length - 1) {
