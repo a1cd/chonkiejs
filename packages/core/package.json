@@ -1,6 +1,6 @@
 {
   "name": "@chonkiejs/core",
-  "version": "0.0.8",
+  "version": "0.0.9",
   "description": "Core chunking library for Chonkie - lightweight and efficient text chunking",
   "license": "MIT",
   "homepage": "https://docs.chonkie.ai",
@@ -39,11 +39,11 @@
     "web-tree-sitter": "0.25.10"
   },
   "devDependencies": {
+    "rimraf": "^6.1.3",
     "tree-sitter-wasms": "^0.1.13",
-    "rimraf": "^6.0.1",
     "ts-node": "^10.9.2",
     "tsc-alias": "^1.8.16",
-    "tsx": "^4.20.6",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^3.2.4"
